@@ -409,6 +409,9 @@ const SEARCH_INSTRUCTIONS: &str = indoc! {r#"
 
     In these cases, you should search for usages of the affected item, so that you can see their current state
     and suggest jumping to them if necessary.
+
+    If the affected item is public, make sure to include other files that may reference it in your search.
+    If the name of the affected item is unique enough, search for it in the entire project.
 "#};
 
 const JUMP_INSTRUCTIONS: &str = indoc! {"
