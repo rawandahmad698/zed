@@ -111,6 +111,19 @@ impl RelPath {
         }
     }
 
+    /// Converts a string with no separators into a [`RelPath`].
+    pub fn new_single(s: &str, path_style: PathStyle) -> Option<&Self> {
+        if s.contains(path_style.separators_ch()) {
+            None
+        } else {
+            match s {
+                "" | "." => Some(Self::new_unchecked(s)),
+                ".." => None,
+                other => Some(Self::new_unchecked(other)),
+            }
+        }
+    }
+
     fn new_unchecked(s: &str) -> &Self {
         // Safety: `RelPath` is a transparent wrapper around `str`.
         unsafe { &*(s as *const str as *const Self) }

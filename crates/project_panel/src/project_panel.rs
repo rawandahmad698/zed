@@ -61,7 +61,11 @@ use ui::{
     ScrollAxes, ScrollableHandle, Scrollbars, StickyCandidate, Tooltip, WithScrollbar, prelude::*,
     v_flex,
 };
-use util::{ResultExt, TakeUntilExt, TryFutureExt, maybe, paths::compare_paths, rel_path::RelPath};
+use util::{
+    ResultExt, TakeUntilExt, TryFutureExt, maybe,
+    paths::{PathStyle, compare_paths},
+    rel_path::RelPath,
+};
 use workspace::{
     DraggedSelection, OpenInTerminal, OpenOptions, OpenVisible, PreviewTabsSettings, SelectedEntry,
     SplitDirection, Workspace,
@@ -1607,7 +1611,7 @@ impl ProjectPanel {
             }
             let trimmed_filename = trimmed_filename.trim_start_matches('/');
 
-            let Ok(filename) = RelPath::unix(trimmed_filename) else {
+            let Some(filename) = RelPath::new_single(trimmed_filename, PathStyle::local()) else {
                 edit_state.validation_state = ValidationState::Warning(
                     "File or directory name contains leading or trailing whitespace.".to_string(),
                 );
@@ -2727,7 +2731,7 @@ impl ProjectPanel {
             .path
             .file_name()?
             .to_string();
-        new_path.push(RelPath::unix(&clipboard_entry_file_name).unwrap());
+        new_path.push(RelPath::new_single(&clipboard_entry_file_name, PathStyle::local()).unwrap());
         let extension = new_path.extension().map(|s| s.to_string());
         let file_name_without_extension = new_path.file_stem()?.to_string();
         let file_name_len = file_name_without_extension.len();
@@ -2755,7 +2759,7 @@ impl ProjectPanel {
                     new_file_name.push_str(extension);
                 }
 
-                new_path.push(RelPath::unix(&new_file_name).unwrap());
+                new_path.push(RelPath::new_single(&new_file_name, PathStyle::local()).unwrap());
 
                 disambiguation_range = Some(file_name_len..(file_name_len + disambiguation_len));
                 ix += 1;
@@ -3133,7 +3137,9 @@ impl ProjectPanel {
             }
 
             let mut new_path = destination_path.to_rel_path_buf();
-            new_path.push(RelPath::unix(source_path.path.file_name()?).unwrap());
+            new_path.push(
+                RelPath::new_single(source_path.path.file_name()?, PathStyle::local()).unwrap(),
+            );
             if new_path.as_rel_path() != source_path.path.as_ref() {
                 let task = project.rename_entry(
                     entry_to_move,
@@ -3306,7 +3312,9 @@ impl ProjectPanel {
             entry: Entry {
                 id: NEW_ENTRY_ID,
                 kind: new_entry_kind,
-                path: parent_entry.path.join(RelPath::unix("\0").unwrap()),
+                path: parent_entry
+                    .path
+                    .join(RelPath::new_single("\0", PathStyle::local()).unwrap()),
                 inode: 0,
                 mtime: parent_entry.mtime,
                 size: parent_entry.size,
@@ -3506,16 +3514,21 @@ impl ProjectPanel {
                                         entry.path.strip_prefix(root_folded_entry).ok().and_then(
                                             |suffix| {
                                                 Some(
-                                                    RelPath::unix(root_folded_entry.file_name()?)
-                                                        .unwrap()
-                                                        .join(suffix),
+                                                    RelPath::new_single(
+                                                        root_folded_entry.file_name()?,
+                                                        PathStyle::local(),
+                                                    )
+                                                    .unwrap()
+                                                    .join(suffix),
                                                 )
                                             },
                                         )
                                     })
                                     .or_else(|| {
                                         entry.path.file_name().map(|file_name| {
-                                            RelPath::unix(file_name).unwrap().into()
+                                            RelPath::new_single(file_name, PathStyle::local())
+                                                .unwrap()
+                                                .into()
                                         })
                                     })
                                     .unwrap_or_else(|| entry.path.clone());
@@ -3692,7 +3705,8 @@ impl ProjectPanel {
             if let Some(name) = path.file_name()
                 && let Some(name) = name.to_str()
             {
-                let target_path = target_directory.join(RelPath::unix(name).unwrap());
+                let target_path =
+                    target_directory.join(RelPath::new_single(name, PathStyle::local()).unwrap());
                 if worktree.read(cx).entry_for_path(&target_path).is_some() {
                     paths_to_replace.push((name.to_string(), path.clone()));
                 }

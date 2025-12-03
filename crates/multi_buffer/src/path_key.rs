@@ -33,9 +33,12 @@ impl PathKey {
         } else {
             Self {
                 sort_prefix: None,
-                path: RelPath::unix(&buffer.entity_id().to_string())
-                    .unwrap()
-                    .into_arc(),
+                path: RelPath::new_single(
+                    &buffer.entity_id().to_string(),
+                    util::paths::PathStyle::local(),
+                )
+                .unwrap()
+                .into_arc(),
             }
         }
     }

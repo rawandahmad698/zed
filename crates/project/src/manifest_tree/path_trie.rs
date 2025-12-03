@@ -61,6 +61,7 @@ impl<Label: Ord + Clone> RootPathTrie<Label> {
 
         let mut path_so_far = <Arc<RelPath>>::from(RelPath::empty());
         for key in path.0.iter() {
+            // FIXME: unix seems wrong?
             path_so_far = path_so_far.join(RelPath::unix(key.as_ref()).unwrap());
             current = match current.children.entry(key.clone()) {
                 Entry::Vacant(vacant_entry) => {

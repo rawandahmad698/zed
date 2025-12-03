@@ -1533,6 +1533,71 @@ async fn test_create_dir_all_on_create_entry(cx: &mut TestAppContext) {
     });
 }
 
+#[gpui::test]
+async fn test_create_entry_in_ignored_dir(cx: &mut TestAppContext) {
+    init_test(cx);
+    cx.executor().allow_parking();
+
+    let fs_fake = FakeFs::new(cx.background_executor.clone());
+    fs_fake
+        .insert_tree(
+            path!("/root"),
+            json!({
+                ".gitignore": "node_modules\n",
+                "one": {
+                    "node_modules": {
+                        "world.txt": "a"
+                    },
+                },
+                "two": {
+                },
+            }),
+        )
+        .await;
+
+    let tree = Worktree::local(
+        Path::new(path!("/root")),
+        true,
+        fs_fake.clone(),
+        Default::default(),
+        &mut cx.to_async(),
+    )
+    .await
+    .unwrap();
+
+    cx.read(|cx| tree.read(cx).as_local().unwrap().scan_complete())
+        .await;
+
+    let entry = tree
+        .update(cx, |tree, cx| {
+            tree.as_local_mut().unwrap().create_entry(
+                rel_path("one/node_modules/hello.txt").into(),
+                false,
+                None,
+                cx,
+            )
+        })
+        .await
+        .unwrap()
+        .into_included()
+        .unwrap();
+    assert!(entry.is_file());
+
+    cx.executor().run_until_parked();
+    tree.read_with(cx, |tree, _| {
+        assert!(
+            tree.entry_for_path(rel_path("one/node_modules/hello.txt"))
+                .unwrap()
+                .is_file()
+        );
+        assert!(
+            tree.entry_for_path(rel_path("one/node_modules/world.txt"))
+                .unwrap()
+                .is_file()
+        );
+    });
+}
+
 #[gpui::test(iterations = 100)]
 async fn test_random_worktree_operations_during_initial_scan(
     cx: &mut TestAppContext,

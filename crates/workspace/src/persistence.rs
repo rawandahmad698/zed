@@ -914,6 +914,7 @@ impl WorkspaceDb {
                     relative_worktree_path == String::default()
                 );
 
+                // FIXME: unix path seems wrong here?
                 let Some(relative_path) = RelPath::unix(&relative_worktree_path).log_err() else {
                     continue;
                 };

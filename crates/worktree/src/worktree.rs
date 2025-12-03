@@ -1385,8 +1385,13 @@ impl LocalWorktree {
         content: Option<Vec<u8>>,
         cx: &Context<Worktree>,
     ) -> Task<Result<CreatedEntry>> {
+        dbg!(&is_dir, &path);
+
         let abs_path = self.absolutize(&path);
+        dbg!(&abs_path);
+
         let path_excluded = self.settings.is_path_excluded(&path);
+        dbg!(&path_excluded);
         let fs = self.fs.clone();
         let task_abs_path = abs_path.clone();
         let write = cx.background_spawn(async move {
@@ -1402,9 +1407,11 @@ impl LocalWorktree {
         });
 
         let lowest_ancestor = self.lowest_ancestor(&path);
+        dbg!(&lowest_ancestor);
         cx.spawn(async move |this, cx| {
             write.await?;
             if path_excluded {
+                println!("entry created: {:?}", &abs_path);
                 return Ok(CreatedEntry::Excluded { abs_path });
             }
 
@@ -1417,6 +1424,7 @@ impl LocalWorktree {
                     }
                     let refresh_full_path = lowest_ancestor.join(refresh_path);
 
+                    dbg!(&refresh_full_path);
                     refreshes.push(this.as_local_mut().unwrap().refresh_entry(
                         refresh_full_path,
                         None,
@@ -1431,9 +1439,10 @@ impl LocalWorktree {
             for refresh in refreshes {
                 refresh.await.log_err();
             }
-
-            Ok(result
-                .await?
+            println!("refreshing...");
+            let res = result.await?;
+            dbg!(&res);
+            Ok(res
                 .map(CreatedEntry::Included)
                 .unwrap_or_else(|| CreatedEntry::Excluded { abs_path }))
         })
@@ -1658,6 +1667,7 @@ impl LocalWorktree {
 
     pub fn refresh_entries_for_paths(&self, paths: Vec<Arc<RelPath>>) -> barrier::Receiver {
         let (tx, rx) = barrier::channel();
+        dbg!(&paths);
         self.scan_requests_tx
             .try_send(ScanRequest {
                 relative_paths: paths,
@@ -2108,7 +2118,7 @@ impl Snapshot {
         if path.file_name().is_some() {
             let mut abs_path = self.abs_path.to_string();
             for component in path.components() {
-                if !abs_path.ends_with(self.path_style.primary_separator()) {
+                if !abs_path.ends_with(self.path_style.separators_ch()) {
                     abs_path.push_str(self.path_style.primary_separator());
                 }
                 abs_path.push_str(component);
@@ -2727,6 +2737,9 @@ impl BackgroundScannerState {
             // * if the mtime is the same, the file was probably been renamed.
             // * if the path is the same, the file may just have been updated
             if let Some(removed_entry) = self.removed_entries.remove(&entry.inode) {
+                println!("reuse entry id");
+                dbg!(&removed_entry.path, &entry.path);
+
                 if removed_entry.mtime == Some(mtime) || removed_entry.path == entry.path {
                     entry.id = removed_entry.id;
                 }
@@ -3758,7 +3771,7 @@ impl BackgroundScanner {
                         };
 
                         if let Some(abs_path) = self.fs.canonicalize(&abs_path).await.log_err() {
-                            self.process_events(vec![abs_path]).await;
+                            self.process_events(vec![SanitizedPath::new(&abs_path).as_path().to_owned()]).await;
                         }
                     }
                     self.send_status_update(false, request.done).await;
@@ -4043,6 +4056,7 @@ impl BackgroundScanner {
     }
 
     async fn forcibly_load_paths(&self, paths: &[Arc<RelPath>]) -> bool {
+        println!("---start of forcibly_load_paths---");
         let (scan_job_tx, scan_job_rx) = channel::unbounded();
         {
             let mut state = self.state.lock().await;
@@ -4052,7 +4066,9 @@ impl BackgroundScanner {
                     if let Some(entry) = state.snapshot.entry_for_path(ancestor)
                         && entry.kind == EntryKind::UnloadedDir
                     {
+                        dbg!(&ancestor, &ancestor.as_std_path());
                         let abs_path = root_path.join(ancestor.as_std_path());
+                        dbg!(&abs_path);
                         state
                             .enqueue_scan_dir(
                                 abs_path.into(),
@@ -4061,6 +4077,8 @@ impl BackgroundScanner {
                                 self.fs.as_ref(),
                             )
                             .await;
+                        println!("adding path to paths_to_scan");
+                        dbg!(&path);
                         state.paths_to_scan.insert(path.clone());
                         break;
                     }
@@ -4072,6 +4090,7 @@ impl BackgroundScanner {
             self.scan_dir(&job).await.log_err();
         }
 
+        println!("---end of forcibly_load_paths---");
         !mem::take(&mut self.state.lock().await.paths_to_scan).is_empty()
     }
 
@@ -4308,7 +4327,8 @@ impl BackgroundScanner {
                     child_entry.is_external = true;
                 }
 
-                child_entry.canonical_path = Some(canonical_path.into());
+                child_entry.canonical_path =
+                    Some(SanitizedPath::new(&canonical_path).as_path().into());
             }
 
             if child_entry.is_dir() {
@@ -4403,6 +4423,8 @@ impl BackgroundScanner {
         abs_paths: Vec<PathBuf>,
         scan_queue_tx: Option<Sender<ScanJob>>,
     ) {
+        debug_assert_eq!(abs_paths.len(), relative_paths.len());
+        dbg!(relative_paths, &abs_paths);
         // grab metadata for all requested paths
         let metadata = futures::future::join_all(
             abs_paths
@@ -4448,18 +4470,21 @@ impl BackgroundScanner {
         // refreshed. Do this before adding any new entries, so that renames can be
         // detected regardless of the order of the paths.
         for (path, metadata) in relative_paths.iter().zip(metadata.iter()) {
+            dbg!(path, metadata);
             if matches!(metadata, Ok(None)) || doing_recursive_update {
                 state.remove_path(path);
             }
         }
 
-        for (path, metadata) in relative_paths.iter().zip(metadata.into_iter()) {
-            let abs_path: Arc<Path> = root_abs_path.join(path.as_std_path()).into();
+        for (abs_path, (path, metadata)) in abs_paths
+            .iter()
+            .zip(relative_paths.iter().zip(metadata.into_iter()))
+        {
             match metadata {
                 Ok(Some((metadata, canonical_path))) => {
                     let ignore_stack = state
                         .snapshot
-                        .ignore_stack_for_abs_path(&abs_path, metadata.is_dir, self.fs.as_ref())
+                        .ignore_stack_for_abs_path(abs_path, metadata.is_dir, self.fs.as_ref())
                         .await;
                     let is_external = !canonical_path.starts_with(&root_canonical_path);
                     let mut fs_entry = Entry::new(
@@ -4475,7 +4500,7 @@ impl BackgroundScanner {
                     );
 
                     let is_dir = fs_entry.is_dir();
-                    fs_entry.is_ignored = ignore_stack.is_abs_path_ignored(&abs_path, is_dir);
+                    fs_entry.is_ignored = ignore_stack.is_abs_path_ignored(abs_path, is_dir);
                     fs_entry.is_external = is_external;
                     fs_entry.is_private = self.is_path_private(path);
                     fs_entry.is_always_included =
@@ -4483,19 +4508,28 @@ impl BackgroundScanner {
                     fs_entry.is_hidden = self.settings.is_path_hidden(path);
 
                     if let (Some(scan_queue_tx), true) = (&scan_queue_tx, is_dir) {
+                        dbg!(&fs_entry);
+
+                        println!("shoudl scan directory");
+                        dbg!(&fs_entry.id, &state.scanned_dirs);
+                        println!("checking paths to scan");
+                        dbg!(&fs_entry.path, &state.paths_to_scan);
+
                         if state.should_scan_directory(&fs_entry)
                             || (fs_entry.path.is_empty()
                                 && abs_path.file_name() == Some(OsStr::new(DOT_GIT)))
                         {
+                            dbg!();
                             state
                                 .enqueue_scan_dir(
-                                    abs_path,
+                                    Arc::from(&**abs_path),
                                     &fs_entry,
                                     scan_queue_tx,
                                     self.fs.as_ref(),
                                 )
                                 .await;
                         } else {
+                            dbg!("unloaded");
                             fs_entry.kind = EntryKind::UnloadedDir;
                         }
                     }
