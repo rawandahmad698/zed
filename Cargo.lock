@@ -14021,6 +14021,7 @@ dependencies = [
  "urlencoding",
  "util",
  "which 6.0.3",
+ "windows-registry 0.5.3",
 ]
 
 [[package]]
